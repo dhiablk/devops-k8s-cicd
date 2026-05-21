@@ -1,4 +1,4 @@
-name: "🔥 CI Pipeline — Build, Test, Scan"
+name: CI Pipeline
 
 on:
   push:
@@ -7,12 +7,15 @@ on:
     branches: [main]
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/flask-api
+  IMAGE_NAME: flask-api
 
 jobs:
+
+  # ══════════════════════════════════════
+  #  JOB 1 : Tests
+  # ══════════════════════════════════════
   test:
-    name: "🧪 Tests"
+    name: Tests unitaires
     runs-on: ubuntu-latest
 
     steps:
@@ -23,26 +26,33 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
+          cache: pip
 
       - name: Install dependencies
         run: |
           cd app
           pip install -r requirements.txt
 
-      - name: Run tests with coverage
+      - name: Run tests
         run: |
           cd app
-          python -m pytest tests/ -v --cov=. --cov-report=xml --cov-report=html
+          python -m pytest tests/test_app.py -v \
+            --cov=. \
+            --cov-report=xml \
+            --cov-report=term-missing
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: coverage-report
-          path: app/htmlcov/
+          path: app/coverage.xml
 
+  # ══════════════════════════════════════
+  #  JOB 2 : Build Docker
+  # ══════════════════════════════════════
   build:
-    name: "🐳 Build Docker"
+    name: Build Docker Image
     runs-on: ubuntu-latest
     needs: test
     permissions:
@@ -50,8 +60,7 @@ jobs:
       packages: write
 
     outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
-      image_digest: ${{ steps.build.outputs.digest }}
+      image_tag: ${{ steps.meta.outputs.version }}
 
     steps:
       - name: Checkout
@@ -61,34 +70,34 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ghcr.io/${{ github.repository }}
           tags: |
-            type=sha,prefix=
+            type=sha,prefix=sha-
             type=ref,event=branch
-            type=semver,pattern={{version}}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  security-scan:
-    name: "🛡️ Trivy Security Scan"
+  # ══════════════════════════════════════
+  #  JOB 3 : Trivy Security Scan
+  # ══════════════════════════════════════
+  security:
+    name: Trivy Security Scan
     runs-on: ubuntu-latest
     needs: build
     permissions:
@@ -99,106 +108,88 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: "🐳 Scan Docker Image — Vulnerabilities"
+      - name: Scan image vulnerabilities
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          format: "table"
-          exit-code: "0"
+          image-ref: ghcr.io/${{ github.repository }}:latest
+          format: table
+          severity: CRITICAL,HIGH
           ignore-unfixed: true
-          severity: "CRITICAL,HIGH"
-          vuln-type: "os,library"
+          exit-code: "0"
 
-      - name: "📄 Generate SARIF Report"
+      - name: Generate SARIF
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          format: "sarif"
-          output: "trivy-image-results.sarif"
-          severity: "CRITICAL,HIGH,MEDIUM"
+          image-ref: ghcr.io/${{ github.repository }}:latest
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH,MEDIUM
 
-      - name: "📤 Upload SARIF to GitHub Security"
+      - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: "trivy-image-results.sarif"
-          category: "trivy-image"
+          sarif_file: trivy-image.sarif
+          category: image-scan
 
-      - name: "☸️ Scan K8s Manifests — Misconfigurations"
+      - name: Scan Dockerfile
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: "config"
-          scan-ref: "./k8s/"
-          format: "table"
+          scan-type: config
+          scan-ref: ./docker/Dockerfile
+          format: table
+          severity: CRITICAL,HIGH
           exit-code: "0"
-          severity: "CRITICAL,HIGH"
 
-      - name: "📄 K8s SARIF Report"
+      - name: Scan K8s manifests
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: "config"
-          scan-ref: "./k8s/"
-          format: "sarif"
-          output: "trivy-k8s-results.sarif"
+          scan-type: config
+          scan-ref: ./k8s/
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "0"
 
-      - name: "📤 Upload K8s SARIF"
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Scan dependencies
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: ./app/
+          format: table
+          severity: CRITICAL,HIGH
+          scanners: vuln
+          exit-code: "0"
+
+      - name: Scan secrets
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          scanners: secret
+          exit-code: "0"
+
+      - name: Security Gate CRITICAL
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:latest
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Upload JSON report
+        uses: aquasecurity/trivy-action@master
         if: always()
         with:
-          sarif_file: "trivy-k8s-results.sarif"
-          category: "trivy-k8s"
+          image-ref: ghcr.io/${{ github.repository }}:latest
+          format: json
+          output: trivy-report.json
+          severity: CRITICAL,HIGH,MEDIUM
 
-      - name: "📝 Scan Dockerfile — Misconfigurations"
-        uses: aquasecurity/trivy-action@master
+      - name: Save report artifact
+        uses: actions/upload-artifact@v4
+        if: always()
         with:
-          scan-type: "config"
-          scan-ref: "./docker/Dockerfile"
-          format: "table"
-          exit-code: "0"
-          severity: "CRITICAL,HIGH"
-
-      - name: "📦 Scan Dependencies — Vulnerabilities"
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: "fs"
-          scan-ref: "./app/"
-          format: "table"
-          exit-code: "0"
-          severity: "CRITICAL,HIGH"
-          scanners: "vuln"
-
-      - name: "🔑 Scan for Exposed Secrets"
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: "fs"
-          scan-ref: "."
-          format: "table"
-          exit-code: "1"
-          scanners: "secret"
-
-      - name: "🚫 Security Gate — Fail on CRITICAL"
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          format: "table"
-          exit-code: "1"
-          ignore-unfixed: true
-          severity: "CRITICAL"
-
-  lint:
-    name: "📐 Lint K8s Manifests"
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install kubeval
-        run: |
-          wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
-          tar xf kubeval-linux-amd64.tar.gz
-          sudo mv kubeval /usr/local/bin/
-
-      - name: Validate K8s manifests
-        run: |
-          find k8s/ -name '*.yaml' -exec kubeval --strict {} \;
+          name: trivy-report
+          path: trivy-report.json

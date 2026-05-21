@@ -1,0 +1,24 @@
+scan:
+  severity:
+    - CRITICAL
+    - HIGH
+    - MEDIUM
+
+  vuln-type:
+    - os
+    - library
+
+  ignore-unfixed: false
+  timeout: 10m
+
+output:
+  format: table
+
+misconfiguration:
+  dockerfile:
+    enabled: true
+  kubernetes:
+    enabled: true
+
+secret:
+  enabled: true

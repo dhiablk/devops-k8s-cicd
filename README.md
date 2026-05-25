@@ -1,6 +1,4 @@
-PowerShell
 
-@'
 # 🚀 DevOps K8s CI/CD Project
 
 > Projet complet DevOps : Flask API conteneurisée, déployée sur Kubernetes avec CI/CD automatisé, scan de sécurité Trivy et monitoring Prometheus/Grafana.

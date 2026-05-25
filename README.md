@@ -59,3 +59,4 @@ Exécutez en PowerShell administrateur :
 .
 \security\trivy-scan.ps1 -ImageName "flask-api:latest" -SeverityThreshold "HIGH" -FailOnVuln -Full
 ```
+<img width="949" height="426" alt="image" src="https://github.com/user-attachments/assets/9ed2ef69-8a4c-4cc9-9875-cb52f9a64ad3" />

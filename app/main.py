@@ -1,4 +1,4 @@
-import os
+﻿import os
 import logging
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── App et DB dans le même fichier, pas d'import circulaire ──
 app = Flask(__name__)
 
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key')
@@ -21,26 +20,30 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Mode TEST
+if os.getenv('TESTING', 'false').lower() == 'true':
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+    app.config['TESTING'] = True
+
 db = SQLAlchemy(app)
 
-# ── Redis ──
-try:
-    import redis
-    r = redis.Redis(
-        host=os.getenv('REDIS_HOST', 'localhost'),
-        port=int(os.getenv('REDIS_PORT', 6379)),
-        decode_responses=True,
-        socket_connect_timeout=3
-    )
-    r.ping()
-    app.redis = r
-    logger.info("✅ Redis OK")
-except Exception as e:
-    logger.warning(f"⚠️ Redis: {e}")
-    app.redis = None
+app.redis = None
+if not app.config.get('TESTING'):
+    try:
+        import redis
+        r = redis.Redis(
+            host=os.getenv('REDIS_HOST', 'localhost'),
+            port=int(os.getenv('REDIS_PORT', 6379)),
+            decode_responses=True,
+            socket_connect_timeout=3
+        )
+        r.ping()
+        app.redis = r
+        logger.info("Redis OK")
+    except Exception as e:
+        logger.warning(f"Redis: {e}")
 
 
-# ── Modèle ──
 class Task(db.Model):
     __tablename__ = 'tasks'
     id          = db.Column(db.Integer, primary_key=True)
@@ -61,15 +64,11 @@ class Task(db.Model):
         }
 
 
-# ── Créer les tables ──
-with app.app_context():
-    db.create_all()
-    logger.info("✅ Tables créées")
+if not app.config.get('TESTING'):
+    with app.app_context():
+        db.create_all()
+        logger.info("Tables creees")
 
-
-# ══════════════════════════════════════════
-#  ROUTES HEALTH
-# ══════════════════════════════════════════
 
 @app.route('/live')
 def live():
@@ -94,7 +93,6 @@ def health():
         'checks':      {}
     }
 
-    # DB
     try:
         db.session.execute(db.text('SELECT 1'))
         result['checks']['database'] = 'up'
@@ -102,7 +100,6 @@ def health():
         result['checks']['database'] = f'down: {e}'
         result['status'] = 'unhealthy'
 
-    # Redis
     try:
         if app.redis:
             app.redis.ping()
@@ -115,10 +112,6 @@ def health():
     code = 200 if result['status'] == 'healthy' else 503
     return jsonify(result), code
 
-
-# ══════════════════════════════════════════
-#  ROUTES API
-# ══════════════════════════════════════════
 
 @app.route('/api/v1/tasks', methods=['GET'])
 def list_tasks():
@@ -156,7 +149,7 @@ def update_task(task_id):
     task = db.get_or_404(Task, task_id)
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'données requises'}), 400
+        return jsonify({'error': 'donnees requises'}), 400
 
     task.title       = data.get('title', task.title)
     task.description = data.get('description', task.description)
@@ -171,7 +164,7 @@ def delete_task(task_id):
     task = db.get_or_404(Task, task_id)
     db.session.delete(task)
     db.session.commit()
-    return jsonify({'message': f'tâche {task_id} supprimée'}), 200
+    return jsonify({'message': f'tache {task_id} supprimee'}), 200
 
 
 @app.route('/api/v1/stats', methods=['GET'])
@@ -186,13 +179,9 @@ def stats():
     }), 200
 
 
-# ══════════════════════════════════════════
-#  LANCEMENT
-# ══════════════════════════════════════════
-
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
-    logger.info(f"🚀 Flask sur http://0.0.0.0:{port}")
+    logger.info(f"Flask sur http://0.0.0.0:{port}")
     app.run(
         host='0.0.0.0',
         port=port,

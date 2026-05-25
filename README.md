@@ -123,7 +123,7 @@ Bash
 cd app
 pip install -r requirements.txt
 TESTING=true python -m pytest tests/ -v --cov=.
-☸️ Déploiement Kubernetes
+### ☸️ Déploiement Kubernetes
 PowerShell
 
 # Tout en une commande
@@ -143,7 +143,10 @@ minikube kubectl -- apply -f k8s/app.yaml
 
 # Accès
 minikube kubectl -- port-forward svc/flask-api-service 8080:80 -n flask-app
-🔄 CI/CD
+```
+---
+
+### 🔄 CI/CD
 Pipeline déclenché à chaque push sur main :
 
 text
